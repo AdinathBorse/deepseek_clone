@@ -1,5 +1,5 @@
 export const maxDuration = 60;
-export const runtime = "nodejs"; // ✅ IMPORTANT
+export const runtime = "nodejs"; // Specify the runtime environment
 
 import { getAuth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
@@ -7,14 +7,20 @@ import OpenAI from "openai";
 import dbConnect from "@/config/db";
 import Chat from "@/models/Chat";
 
+const openai = new OpenAI({
+  baseURL: "https://openrouter.ai/api/v1",
+  apiKey: process.env.OPENAI_API_KEY,
+  defaultHeaders: {
+    "HTTP-Referer": "http://localhost:3000",
+    "X-Title": "My NextJS App",
+  },
+});
+
 export async function POST(req) {
   try {
     const { userId } = getAuth(req);
     if (!userId) {
-      return NextResponse.json(
-        { success: false, message: "Unauthorized" },
-        { status: 401 }
-      );
+      return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
     }
 
     const { prompt, chatId } = await req.json();
@@ -23,35 +29,22 @@ export async function POST(req) {
     const data = await Chat.findOne({ _id: chatId, userId });
 
     if (!data) {
-      return NextResponse.json(
-        { success: false, message: "Chat not found" },
-        { status: 404 }
-      );
-    }
-
-    // ✅ Create OpenAI INSIDE handler (FIX)
-    const openai = new OpenAI({
-      baseURL: "https://openrouter.ai/api/v1",
-      apiKey: process.env.OPENAI_API_KEY,
-      defaultHeaders: {
-        "X-Title": "My NextJS App",
-      },
-    });
-
-    if (!process.env.OPENAI_API_KEY) {
-      throw new Error("OPENAI_API_KEY is missing");
+      return NextResponse.json({ success: false, message: "Chat not found" }, { status: 404 });
     }
 
     // Save user message
-    data.messages.push({
+    const userMessage = {
       role: "user",
       content: prompt,
       timestamp: Date.now(),
-    });
+    };
+    data.messages.push(userMessage);
 
+    // Call OpenRouter (DeepSeek)
     const completion = await openai.chat.completions.create({
       model: "deepseek/deepseek-chat",
       messages: [{ role: "user", content: prompt }],
+      store: true,
     });
 
     const aiMessage = {
@@ -66,9 +59,6 @@ export async function POST(req) {
     return NextResponse.json({ success: true, data: aiMessage });
   } catch (error) {
     console.error("AI route error:", error);
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
